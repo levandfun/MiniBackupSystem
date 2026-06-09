@@ -10,22 +10,43 @@ public class NetworkClient(HttpClient httpClient, ILogger<NetworkClient> logger)
     private readonly ILogger<NetworkClient> _logger = logger;
     private readonly HttpClient _httpClient = httpClient;
 
-    public async Task<ManifestResponse?> SendManifestAsync(BackupJobConfig config, IEnumerable<FileMetadata> files, CancellationToken token)
+    public async Task<int> CreateSessionAsync(BackupJobConfig config, CancellationToken token)
+    {
+        var url = $"{config.ServerUrl.TrimEnd('/')}/api/backup/session/create";
+        var requestData = new CreateSessionRequest { ClientName = config.ClientName };
+
+        var response = await _httpClient.PostAsJsonAsync(url, requestData, token);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        return result.GetProperty("sessionId").GetInt32();
+    }
+
+    public async Task<ManifestResponse?> SendManifestAsync(BackupJobConfig config, int sessionId,  IEnumerable<FileMetadata> files, CancellationToken token)
     {
         var url = $"{config.ServerUrl.TrimEnd('/')}/api/backup/start";
-        var requestData = new {  Config = config, Files = files, ClientName = config.ClientName };
+        var requestData = new 
+        {
+            SessionId = sessionId,
+            Config = config,
+            Files = files.Select(f => new FileMetadata
+            {
+                FilePath = f.FilePath, 
+                RelativePath = f.RelativePath,
+                Hash = f.Hash,
+                Size = f.Size
+            }).ToList()
+        };
         try
         {
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Sending manifest to {Endpoint} for job {JobId} with {FileCount} files", url, config.JobId, files.Count());
+            _logger.LogInformation("Sending manifest to {Endpoint} for job {JobId} with {FileCount} files", url, config.JobId, files.Count());
             var response = await _httpClient.PostAsJsonAsync(url, requestData, token);
             if (response.IsSuccessStatusCode)
             {
                 var result = await response.Content.ReadFromJsonAsync<ManifestResponse>(
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
                 token);
-                if (_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Manifest sent successfully for job {JobId}. Server responded with {FileCount} files to upload.", config.JobId, result?.FilesToUpload.Count ?? 0);
+                _logger.LogInformation("Manifest sent successfully for job {JobId}. Server responded with {FileCount} files to upload.", config.JobId, result?.FilesToUpload.Count ?? 0);
                 return result;
             }
             else

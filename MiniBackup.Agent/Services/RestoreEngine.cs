@@ -1,10 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using MiniBackup.Agent.Extensions;
 using MiniBackup.Shared.Models;
-using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
-using System.Text;
 
 namespace MiniBackup.Agent.Services;
 

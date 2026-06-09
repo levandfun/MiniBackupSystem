@@ -1,6 +1,8 @@
 ﻿namespace MiniBackup.Agent.Services;
 
+using MiniBackup.Shared.Models;
+
 public interface IBackupEngine
 {
-    Task RunAsync(string configPath, CancellationToken cancellationToken);
+    Task RunAsync(BackupJobConfig config, CancellationToken cancellationToken);
 }

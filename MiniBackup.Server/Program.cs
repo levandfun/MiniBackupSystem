@@ -27,7 +27,7 @@ using (var scope = app.Services.CreateScope())
 }
 app.MapGet("/ping", () => Results.Ok("MiniBackup Server is running!"));
 
-app.MapPost("/api/backup/start", async (ManifestRequest request, BackupDbContext db, ILogger<Program> logger) =>
+app.MapPost("/api/backup/session/create", async (CreateSessionRequest request, BackupDbContext db, ILogger<Program> logger) =>
 {
     var session = new BackupSession
     {
@@ -35,9 +35,19 @@ app.MapPost("/api/backup/start", async (ManifestRequest request, BackupDbContext
         Status = BackupStatus.Started,
         ClientName = request.ClientName,
     };
+
     db.Sessions.Add(session);
     await db.SaveChangesAsync();
-    var response = new ManifestResponse { SessionId = session.Id };
+
+    logger.LogInformation("Started new backup session {SessionId} for client {ClientName}", session.Id, request.ClientName);
+
+    return Results.Ok(new { SessionId = session.Id });
+});
+
+
+app.MapPost("/api/backup/start", async (ManifestRequest request, BackupDbContext db, ServerConfig config, ILogger<Program> logger) =>
+{
+    var response = new ManifestResponse { SessionId = request.SessionId };
 
     var incomingHashes = request.Files.Select(f => f.Hash).ToHashSet();
     var knownHashes = new HashSet<string>();
@@ -58,10 +68,9 @@ app.MapPost("/api/backup/start", async (ManifestRequest request, BackupDbContext
 
         if (knownHashes.Contains(file.Hash))
         {
-
             string shardFolder = file.Hash[..2];
             string shardFileName = file.Hash[2..];
-            string physicalPath = Path.Combine(serverConfig.StoragePath, "blobs", shardFolder, shardFileName);
+            string physicalPath = Path.Combine(config.StoragePath, "blobs", shardFolder, shardFileName);
 
             if (System.IO.File.Exists(physicalPath))
             {
@@ -69,7 +78,6 @@ app.MapPost("/api/backup/start", async (ManifestRequest request, BackupDbContext
             }
             else
             {
-
                 logger.LogWarning("Hash {Hash} is known but file is missing on disk. Marking for re-upload.", file.Hash);
             }
         }
@@ -78,7 +86,7 @@ app.MapPost("/api/backup/start", async (ManifestRequest request, BackupDbContext
         {
             var linkedFile = new BackupFile
             {
-                SessionId = session.Id,
+                SessionId = request.SessionId, // Привязываем файл к переданной сессии!
                 Hash = file.Hash,
                 RelativePath = file.RelativePath,
                 SizeBytes = file.Size
@@ -90,8 +98,9 @@ app.MapPost("/api/backup/start", async (ManifestRequest request, BackupDbContext
             response.FilesToUpload.Add(file.FilePath);
         }
     }
+
     await db.SaveChangesAsync();
-    logger.LogInformation("Received manifest for job {JobId} for {ClientName} with {FileCount} files. {FilesToUploadCount} need to be uploaded.", request.Config.JobId, request.ClientName, request.Files.Count, response.FilesToUpload.Count);
+    logger.LogInformation("Received batch for session {SessionId} with {FileCount} files. {FilesToUploadCount} need to be uploaded.", request.SessionId, request.Files.Count, response.FilesToUpload.Count);
 
     return Results.Ok(response);
 });

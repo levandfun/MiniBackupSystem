@@ -22,7 +22,6 @@ public class FileScanner : IFileScanner
                 Hash = string.Empty 
             };
         }
-        await Task.Yield();
     }
 
 }
